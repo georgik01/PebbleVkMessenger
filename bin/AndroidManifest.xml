@@ -26,6 +26,9 @@
             android:configChanges="keyboardHidden|orientation"
             android:label="@string/app_name"
         />
+        <service
+            android:name="com.pebble.vk.messenger.PebbleService"/>
+        
     </application>
 
 </manifest>

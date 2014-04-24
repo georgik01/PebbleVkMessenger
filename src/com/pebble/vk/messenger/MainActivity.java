@@ -1,31 +1,11 @@
 package com.pebble.vk.messenger;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.util.HashMap;
-import java.util.Map;
-
-import org.apache.http.client.HttpClient;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.StatusLine;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import com.perm.kate.api.Api;
-import com.perm.kate.api.KException;
 import com.perm.kate.api.sample.R;
 
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Button;
@@ -36,7 +16,6 @@ public class MainActivity extends Activity {
 	private final int REQUEST_LOGIN=1;
     Object[] longPollParams;
     Object[] longPollParamsNew;
-    String[] messageInbox;
     Thread longPollThread;
     
     Button authorizeButton;
@@ -115,128 +94,30 @@ public class MainActivity extends Activity {
         account.user_id=0;
         account.save(MainActivity.this);
         showButtons();
-        longPollThread.interrupt();
+    	stopService(new Intent(this,PebbleService.class));
     }
-    
     
     private void startLongPoll() {
         //Общение с сервером в отдельном потоке чтобы не блокировать UI поток
-       longPollThread = new Thread(){
-            @Override
-            public void run(){
-            	
-                try {
-                	longPollParams = api.getLongPollServer();
-                	while (!Thread.interrupted()){
-                	showPol();
-                	}
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    sendAlert("exeption","error getting info from longpoll");
-                }
-                
-            }
-        };
-        longPollThread.start();
+    	 new Thread(){
+             @Override
+             public void run(){
+         try {
+	        	 longPollParams = api.getLongPollServer();
+	        	 Intent intent = new Intent(getApplicationContext(), PebbleService.class);
+	             intent.putExtra("key",longPollParams[0].toString());
+	             intent.putExtra("server",longPollParams[1].toString());
+	             intent.putExtra("ts",longPollParams[2].toString());
+	             intent.putExtra("access_token",account.access_token);
+	             startService(intent);
+             } catch (Exception e) {
+	             e.printStackTrace();
+             }
+             }}.start();
     }
-    
-    private void showPol() {
-            	
-            	String infoFromLongPollServer = readFromLongPollServer();
-                try {
-                	JSONObject longPollRecieved = new JSONObject(infoFromLongPollServer);
-                    longPollParams[2] = longPollRecieved.getLong("ts");
-                    JSONArray updates = longPollRecieved.getJSONArray("updates");
-                    String updateString =updates.toString();
-                    if (updateString.contains("[4,")){
-                    	stringSplitter(updateString);
-                    
-                    Log.i("ggg",
-                            "блабла " + messageInbox[0] + messageInbox[1]);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            
-    }
-    
-    public void stringSplitter(String message) throws IOException, JSONException, KException{
-    	String messageToSplit = message;
-    	String[] parts1 = messageToSplit.split("\\[4");
-    	String[] parts2 = parts1[1].split("\\]");
-    	String messageRaw = parts2[0];
-    	String[] parts3 = messageRaw.split("\\,");
-    	String userID = parts3[3];
-    	String flags = parts3[2];
-    	String messageRaw1 = parts3[6];
-    	
-    	JSONArray userInfo = api.getProfile(userID);
-    	JSONObject userInfo1 = userInfo.getJSONObject(0);
-    	
-    	String userFirstName = userInfo1.getString("first_name");
-    	String userLastName = userInfo1.getString("last_name");
-    	String userName = userFirstName + " " + userLastName;
-    	String flags1 = Long.toBinaryString(Long.valueOf(flags));
-    	char inbox = flags1.charAt(flags1.length()-2);
-    	if (inbox == '0') {
-    		StringBuilder sb = new StringBuilder(messageRaw1);
-    		sb.deleteCharAt(messageRaw1.length()-1);
-    		sb.deleteCharAt(0);
-    		String messageFinal = sb.toString();
-    		messageInbox = new String[]{userName,messageFinal};
-    		sendAlert(messageInbox[0],messageInbox[1]);
-    	}
-    };
-    
-    public String readFromLongPollServer() {
-        StringBuilder builder = new StringBuilder();
-        HttpClient client = new DefaultHttpClient();
-        HttpGet httpGet = new HttpGet("http://"+longPollParams[1]+"?act=a_check&key="+longPollParams[0]+"&ts="+longPollParams[2]+"&wait=25&mode=2");
-        try {
-            HttpResponse response = client.execute(httpGet);
-            StatusLine statusLine = response.getStatusLine();
-            int statusCode = statusLine.getStatusCode();
-            if (statusCode == 200) {
-                HttpEntity entity = response.getEntity();
-                InputStream content = entity.getContent();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(content));
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    builder.append(line);
-                }
-            } else {
-                Log.e("ccc", "Failed to download file");
-            }
-        } catch (ClientProtocolException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return builder.toString();
-    }
-    
-    public void sendAlert(String title,String message){
-    	sendAlertToPebble(title,message);
-    }
-    
-    public void sendAlertToPebble(String title,String message) {
-    	final Intent i = new Intent("com.getpebble.action.SEND_NOTIFICATION");
-
-    	final Map data = new HashMap();
-    	data.put("title", title);
-    	data.put("body", message);
-    	final JSONObject jsonData = new JSONObject(data);
-    	final String notificationData = new JSONArray().put(jsonData).toString();
-
-    	i.putExtra("messageType", "PEBBLE_ALERT");
-    	i.putExtra("sender", "MyAndroidApp");
-    	i.putExtra("notificationData", notificationData);
-
-    	sendBroadcast(i);
-    	}
     
     void showButtons(){
-        if(api!=null){
+        if(api!=null&&account.access_token!=null){
             authorizeButton.setVisibility(View.GONE);
             logoutButton.setVisibility(View.VISIBLE);
         }else{
